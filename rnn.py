@@ -49,3 +49,55 @@ class RNN:
 
     def backPropogationThroughTime(self, x, y):
         T = len(y)
+        o, s = self.forwardPropogation(x)
+        dlossdU = np.zeros(self.U.shape)
+        dlossdW = np.zeros(self.W.shape)
+        dlossdV = np.zeros(self.V.shape)
+        dOutput = o
+        dOutput[np.arange(T), y] -= 1.
+
+        for t in range(T-1,-1,-1):
+            # s[t].T is the transpose
+            dlossdV += np.outer(dOutput[t], s[t].T)
+            dt = self.V.T.dot(dOutput[t]) * (1-(s[t]**2))
+            #now we backpropogate through time for self.bpttTruncate units
+            for bpptStep in range(t, max(-1, t-self.bpttTruncate-1), -1):
+                dlossdW += np.outer(dt, s[bpptStep-1])
+                dlossdU[:,x[bpptStep]] += dt
+                dt = self.W.T.dot(dt) * (1 - (s[bpptStep-1] ** 2))
+
+        return [dlossdU, dlossdV, dlossdW]
+
+
+    def sgdStep(self, x, y, learningRate):
+        dlossdU, dlossdV, dlossdW = self.backPropogationThroughTime(x, y)
+        self.U -= learningRate * dlossdU
+        self.V -= learningRate * dlossdV
+        self.W -= learningRate * dlossdW
+
+    def trainModel(self, X_train, y_train, learningRate, nepoch=100, evaluateLossAfter=5):
+        losses = []
+        examplesSeen = 0
+        for epoch in xrange(nepoch):
+            if (epoch%evaluateLossAfter == 0):
+                loss = self.calculateLoss(X_train, y_train)
+                losses.append((examplesSeen, loss))
+                print "Loss after seeing %d examples and %d epoch is %f" % (examplesSeen, epoch, loss)
+                # Need to decrease the learning rate if loss starts increasing
+                if (len(losses)>1 and losses[-1][1] > losses[-2][1]):
+                    learningRate *= 0.5
+                    print "Learning rate updated to %f" % (learningRate)
+                sys.stdout.flush()
+
+            for i in range(len(y_train)):
+                print "Epoch: %d Example: %d" % (epoch, i)
+                self.sgdStep(X_train[i], y_train[i], learningRate)
+                examplesSeen += 1
+
+            print "Saving the value of parameters for current epoch"
+            u_outfile = open('saved-states/'+str(epoch)+'_u.npy','w')
+            v_outfile = open('saved-states/'+str(epoch)+'_v.npy','w')
+            w_outfile = open('saved-states/'+str(epoch)+'_w.npy','w')
+            np.save(u_outfile, self.U)
+            np.save(v_outfile, self.V)
+            np.save(w_outfile, self.W)
